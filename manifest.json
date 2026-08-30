@@ -5,11 +5,10 @@
   "version": "0.1.0",
   "author": "dannymcc",
   "license": "MIT",
-  "description": "Mount and unmount configured VeraCrypt vaults from the Omarchy bar.",
-  "kinds": ["bar-widget", "panel"],
+  "description": "Mount and unmount configured VeraCrypt vaults from a dropdown in the Omarchy bar.",
+  "kinds": ["bar-widget"],
   "entryPoints": {
-    "barWidget": "BarWidget.qml",
-    "panel": "Panel.qml"
+    "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "VeraCrypt",

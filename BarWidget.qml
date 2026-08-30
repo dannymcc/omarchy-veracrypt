@@ -20,6 +20,7 @@ BarWidget {
   property int totalCount: 0
   property string statusText: "Vaults"
   property bool busy: false
+  readonly property string vaultIcon: "󰌾"
 
   function injectPanel() {
     if (!panelLoader.item) return
@@ -29,6 +30,9 @@ BarWidget {
   }
 
   onBarChanged: injectPanel()
+
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
 
   Loader {
     id: panelLoader
@@ -96,8 +100,10 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.vertical ? "VC" : "VC " + root.statusText
+    text: root.vertical ? root.vaultIcon : root.vaultIcon + " " + root.statusText
     tooltipText: "Open VeraCrypt vaults"
+    fixedWidth: root.vertical ? root.barSize : -1
+    fixedHeight: root.barSize
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
       else if (buttonCode === Qt.MiddleButton) root.refresh()

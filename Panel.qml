@@ -133,20 +133,6 @@ Panel {
     cancelAdd()
   }
 
-  function mountAll() {
-    if (busy) return
-    message = "Mounting all vaults..."
-    runScript(["mount-all"])
-  }
-
-  // The header switch reads "is anything open", and flipping it applies to
-  // everything: one vault or five, that is the same gesture.
-  function toggleAll() {
-    if (busy || vaults.length === 0) return
-    if (mountedCount > 0) unmountAll()
-    else mountAll()
-  }
-
   function unmountAll() {
     if (busy) return
     message = "Unmounting all vaults..."
@@ -433,42 +419,16 @@ Panel {
             }
           }
 
-          Row {
+          PanelActionButton {
             id: headerControls
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(6)
-
-            PanelActionButton {
-              id: refreshButton
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: "󰑐"
-              tooltipText: "Refresh"
-              foreground: root.dim
-              hoverColor: root.foreground
-              fontFamily: root.fontFamily
-              enabled: !root.busy
-              onClicked: root.refresh()
-            }
-
-            ToggleSwitch {
-              id: masterSwitch
-              anchors.verticalCenter: parent.verticalCenter
-              visible: root.vaults.length > 0
-              checked: root.mountedCount > 0
-              busy: root.busy
-              cursorRing: false
-              foreground: root.foreground
-              onToggled: root.toggleAll()
-
-              PanelToolTip {
-                visible: masterSwitch.containsMouse
-                text: root.mountedCount > 0
-                  ? "Unmount every vault"
-                  : "Mount every vault"
-                fontFamily: root.fontFamily
-              }
-            }
+            iconText: "󰑐"
+            tooltipText: "Refresh"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            enabled: !root.busy
+            onClicked: root.refresh()
           }
         }
 
@@ -608,6 +568,19 @@ Panel {
             bordered: true
             enabled: !root.busy
             onClicked: root.openAddForm()
+          }
+
+          // Only worth its space once there is more than one thing to close.
+          Button {
+            text: "Unmount all"
+            iconText: "󰌾"
+            foreground: root.busy ? root.dim : root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            bordered: true
+            visible: root.mountedCount > 1
+            enabled: !root.busy
+            onClicked: root.unmountAll()
           }
         }
 

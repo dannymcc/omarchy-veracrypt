@@ -78,9 +78,9 @@ Click it to open the dropdown. Each configured vault shows:
 - `Open`, when mounted
 - `✕` to drop it from the config
 
-The switch at the top right is the master control: on mounts every vault in
-the config, off unmounts them. It only ever touches the vaults in your config,
-never volumes mounted outside the plugin.
+**Unmount all** appears once more than one vault is mounted. It only closes
+the vaults in your config, never volumes mounted outside the plugin. The CLI
+has a matching `mount-all`.
 
 ### Passphrases
 

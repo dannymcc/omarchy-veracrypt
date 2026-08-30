@@ -78,8 +78,9 @@ Click it to open the dropdown. Each configured vault shows:
 - `Open`, when mounted
 - `✕` to drop it from the config
 
-**Unmount all** appears once more than one vault is mounted. It only closes the
-vaults in your config, never volumes mounted outside the plugin.
+The switch at the top right is the master control: on mounts every vault in
+the config, off unmounts them. It only ever touches the vaults in your config,
+never volumes mounted outside the plugin.
 
 ### Passphrases
 
@@ -108,6 +109,7 @@ scripts/veracrypt-vaults list              # list configured vaults
 scripts/veracrypt-vaults status            # mount status for all vaults
 scripts/veracrypt-vaults mount Personal
 scripts/veracrypt-vaults unmount Personal
+scripts/veracrypt-vaults mount-all
 scripts/veracrypt-vaults unmount-all
 scripts/veracrypt-vaults open Personal
 scripts/veracrypt-vaults add Personal ~/vaults/personal.hc ~/Vaults/Personal

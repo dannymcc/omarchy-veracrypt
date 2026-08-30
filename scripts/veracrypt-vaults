@@ -14,6 +14,7 @@ Usage:
   veracrypt-vaults open <name>
   veracrypt-vaults add <name> <container> <mount_directory>
   veracrypt-vaults remove <name>
+  veracrypt-vaults mount-all
   veracrypt-vaults unmount-all
   veracrypt-vaults browse <directory> [files|dirs]
   veracrypt-vaults mkdir <parent> <name>
@@ -38,6 +39,10 @@ json_escape() {
 die_json() {
   printf '{"ok":false,"error":"%s"}\n' "$(json_escape "$1")"
   exit "${2:-1}"
+}
+
+plural() {
+  (( $1 == 1 )) && printf 'vault' || printf 'vaults'
 }
 
 have_cmd() {
@@ -352,6 +357,49 @@ unmount_vault() {
   printf '{"ok":true,"message":"Unmounted","name":"%s"}\n' "$(json_escape "$name")"
 }
 
+# Mount everything in the config that is not mounted yet. One terminal for the
+# lot, so VeraCrypt asks for each passphrase in the same window and sudo asks
+# once rather than once per vault.
+mount_all() {
+  ensure_veracrypt
+  local names=() name container mountpoint
+  while IFS=$'\t' read -r name container mountpoint; do
+    is_mounted "$mountpoint" || mounted_path_for "$container" || {
+      [[ -e "$container" ]] && names+=("$name")
+    }
+  done < <(read_vaults)
+
+  local count=${#names[@]}
+  (( count > 0 )) || { printf '{"ok":true,"message":"Everything is mounted"}\n'; return 0; }
+
+  if ! has_gui && ! has_terminal; then
+    relaunch_in_terminal mount-all
+    printf '{"ok":true,"message":"Opened a terminal for %d %s"}\n' \
+      "$count" "$( (( count == 1 )) && printf 'passphrase' || printf 'passphrases')"
+    return 0
+  fi
+
+  local failed=0 record
+  for name in "${names[@]}"; do
+    record="$(vault_by_name "$name")" || { failed=$((failed + 1)); continue; }
+    IFS=$'\t' read -r name container mountpoint <<< "$record"
+    mkdir -p "$mountpoint"
+    if has_gui; then
+      setsid veracrypt --mount "$container" "$mountpoint" >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    else
+      veracrypt --text --mount "$container" "$mountpoint" || failed=$((failed + 1))
+    fi
+  done
+
+  if (( failed > 0 )); then
+    printf '{"ok":false,"error":"Mounted %d of %d %s"}\n' \
+      "$((count - failed))" "$count" "$(plural "$count")"
+    return 1
+  fi
+  printf '{"ok":true,"message":"Mounted %d %s"}\n' "$count" "$(plural "$count")"
+}
+
 # Unmount everything this config knows to be mounted. Deliberately not
 # `veracrypt --dismount` with no argument: that would also take down volumes
 # mounted outside the plugin, which are none of its business.
@@ -370,7 +418,7 @@ unmount_all() {
   # One terminal for the lot, so sudo asks once rather than once per vault.
   if ! has_gui && ! has_terminal; then
     relaunch_in_terminal unmount-all
-    printf '{"ok":true,"message":"Opened a terminal to unmount %d vaults"}\n' "$count"
+    printf '{"ok":true,"message":"Opened a terminal to unmount %d %s"}\n' "$count" "$(plural "$count")"
     return 0
   fi
 
@@ -382,10 +430,11 @@ unmount_all() {
   done
 
   if (( failed > 0 )); then
-    printf '{"ok":false,"error":"Unmounted %d of %d vaults"}\n' "$((count - failed))" "$count"
+    printf '{"ok":false,"error":"Unmounted %d of %d %s"}\n' \
+      "$((count - failed))" "$count" "$(plural "$count")"
     return 1
   fi
-  printf '{"ok":true,"message":"Unmounted %d vaults"}\n' "$count"
+  printf '{"ok":true,"message":"Unmounted %d %s"}\n' "$count" "$(plural "$count")"
 }
 
 open_mountpoint() {
@@ -406,7 +455,7 @@ main() {
   # status answers without a config file so the panel can offer to make one;
   # everything else needs one to mean anything.
   case "$command" in
-    list|mount|unmount|dismount|open|remove|unmount-all|dismount-all) ensure_config ;;
+    list|mount|unmount|dismount|open|remove|mount-all|unmount-all|dismount-all) ensure_config ;;
   esac
 
   case "$command" in
@@ -431,6 +480,7 @@ main() {
       [[ $# -eq 2 ]] || die_json "mount requires a vault name"
       mount_vault "$2"
       ;;
+    mount-all) mount_all ;;
     unmount-all|dismount-all) unmount_all ;;
     unmount|dismount)
       [[ $# -eq 2 ]] || die_json "unmount requires a vault name"

@@ -94,9 +94,22 @@ Where the passphrase prompt appears depends on which VeraCrypt you have:
 
 Either way the passphrase goes straight to VeraCrypt. The plugin never sees it.
 
-Unmounting is tried in place first, so when it fails the panel can tell you
-why. The usual reason is that something still has the mount open — a file
-manager sitting in the directory will do it. Close that and try again.
+Unmounting needs no passphrase, only root, so it never opens a terminal. It
+escalates in three steps:
+
+1. VeraCrypt's own sudo, if it is still authenticated from an earlier mount.
+   `--use-dummy-sudo-password` is VeraCrypt's documented way of trying that
+   without prompting, so an unmount inside the sudo window is silent.
+2. polkit, which asks for the admin password in Omarchy's own dialog.
+3. a terminal, only on a system with no polkit agent to ask.
+
+Either way the result comes back to the panel, so a failure says why. The
+usual reason is that something still has the mount open — a file manager
+sitting in the directory will do it. Close that and try again.
+
+VeraCrypt's definitive answers ("not mounted", "in use") are reported as they
+are, so the plugin never asks for an admin password only to tell you the vault
+was not mounted.
 
 The dropdown also answers to IPC, so you can bind it to a key or drive it from
 a script:

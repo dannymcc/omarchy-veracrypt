@@ -90,28 +90,85 @@ has_terminal() {
   [[ -t 0 && -t 1 ]]
 }
 
-# Dismounting does not need a passphrase, so try it here first and keep the
-# real reason it failed. Handing it straight to a terminal threw away the one
-# message worth reading -- usually that something still has the mount open.
+# Dismounting needs no passphrase, only root, so it never needs a terminal.
+# The escalation goes, in order:
+#
+#   1. VeraCrypt's own sudo, if it is still authenticated. --use-dummy-sudo-password
+#      is VeraCrypt's documented way to try that without prompting anyone, so a
+#      cached session unmounts silently.
+#   2. polkit, which asks for the admin password in Omarchy's own dialog.
+#   3. a terminal, only where there is no polkit agent to ask.
+#
+# Whatever happens, the result comes back here, so the panel can report it.
 DISMOUNT_ERROR=""
 
+last_line() {
+  printf '%s' "${1-}" | grep -v '^[[:space:]]*$' | tail -n 1
+}
+
+dismount_with_cached_auth() {
+  # Bounded: a probe that is meant never to prompt must never hang either.
+  timeout 20 veracrypt --text --non-interactive --use-dummy-sudo-password \
+    --dismount "$1" 2>&1 </dev/null
+}
+
+# VeraCrypt answers some dismounts definitively, with no privilege involved.
+# Escalating those would ask for an admin password to be told again that the
+# volume is not mounted, or that something still has it open.
+is_final_answer() {
+  local text="${1-}"
+  [[ "$text" == *"No such volume"* || "$text" == *"not mounted"* \
+    || "$text" == *"in use"* || "$text" == *busy* ]]
+}
+
+have_polkit_agent() {
+  have_cmd pkexec && [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]
+}
+
 try_dismount() {
-  local mountpoint="$1" out
+  local mountpoint="$1" out rc
   DISMOUNT_ERROR=""
-  if out="$(veracrypt --text --dismount "$mountpoint" 2>&1 </dev/null)"; then
-    return 0
+
+  rc=0
+  out="$(dismount_with_cached_auth "$mountpoint")" || rc=$?
+  (( rc == 0 )) && return 0
+  local cached_error
+  cached_error="$(last_line "$out")"
+
+  if is_final_answer "$cached_error"; then
+    DISMOUNT_ERROR="$cached_error"
+    return 1
   fi
-  DISMOUNT_ERROR="$(printf '%s' "$out" | grep -v '^$' | tail -n 1)"
+
+  if ! have_polkit_agent; then
+    DISMOUNT_ERROR="${cached_error:-veracrypt could not unmount it}"
+    return 1
+  fi
+
+  rc=0
+  # Long timeout: someone has to read a dialog and type a password.
+  out="$(timeout 180 pkexec veracrypt --text --non-interactive \
+    --dismount "$mountpoint" 2>&1 </dev/null)" || rc=$?
+  (( rc == 0 )) && return 0
+  # 126 is the polkit dialog being dismissed or the authentication failing,
+  # and 127 is pkexec failing to start. Neither is VeraCrypt's fault, and
+  # neither of their messages says anything useful.
+  if (( rc == 126 )); then
+    DISMOUNT_ERROR="Unmount needs the admin password"
+  elif (( rc == 127 )); then
+    DISMOUNT_ERROR="Could not ask for the admin password"
+  else
+    DISMOUNT_ERROR="$(last_line "$out")"
+  fi
+
   [[ -n "$DISMOUNT_ERROR" ]] || DISMOUNT_ERROR="veracrypt could not unmount it"
   return 1
 }
 
-# sudo without a terminal cannot ask for a password. That is the one failure
-# worth retrying somewhere else rather than reporting.
+# Without a polkit agent there is nowhere graphical to ask for the admin
+# password, so a terminal is the only place left.
 needs_terminal() {
-  local text="${1-}"
-  [[ "$text" == *sudo* || "$text" == *tty* || "$text" == *askpass* \
-    || "$text" == *assword* ]]
+  ! have_polkit_agent
 }
 
 # Re-run ourselves in a terminal, where VeraCrypt can ask for the passphrase
@@ -374,10 +431,10 @@ unmount_vault() {
     printf '{"ok":true,"message":"Unmounted","name":"%s"}\n' "$(json_escape "$name")"
     return 0
   fi
-  # Only a missing password justifies a terminal. Anything else -- a mount
-  # something still has open, most often -- is a real answer, and the panel is
-  # where it should show up.
-  if ! has_terminal && needs_terminal "$DISMOUNT_ERROR"; then
+  # Only a missing password justifies a terminal, and only where polkit cannot
+  # ask for it. Anything else -- a mount something still has open, most often
+  # -- is a real answer, and the panel is where it should show up.
+  if ! has_terminal && needs_terminal; then
     relaunch_in_terminal unmount "$name"
     printf '{"ok":true,"message":"Opened a terminal to unmount","name":"%s"}\n' \
       "$(json_escape "$name")"
@@ -451,8 +508,8 @@ unmount_all() {
     try_dismount "$mountpoint" || { failed=$((failed + 1)); last_error="$DISMOUNT_ERROR"; }
   done
 
-  # One terminal for the lot, but only if a password is what stopped us.
-  if (( failed > 0 )) && ! has_terminal && needs_terminal "$last_error"; then
+  # One terminal for the lot, and only where polkit cannot do the asking.
+  if (( failed > 0 )) && ! has_terminal && needs_terminal; then
     relaunch_in_terminal unmount-all
     printf '{"ok":true,"message":"Opened a terminal to unmount %d %s"}\n' "$count" "$(plural "$count")"
     return 0

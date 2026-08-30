@@ -94,6 +94,10 @@ Where the passphrase prompt appears depends on which VeraCrypt you have:
 
 Either way the passphrase goes straight to VeraCrypt. The plugin never sees it.
 
+Unmounting is tried in place first, so when it fails the panel can tell you
+why. The usual reason is that something still has the mount open — a file
+manager sitting in the directory will do it. Close that and try again.
+
 The dropdown also answers to IPC, so you can bind it to a key or drive it from
 a script:
 

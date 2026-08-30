@@ -90,6 +90,30 @@ has_terminal() {
   [[ -t 0 && -t 1 ]]
 }
 
+# Dismounting does not need a passphrase, so try it here first and keep the
+# real reason it failed. Handing it straight to a terminal threw away the one
+# message worth reading -- usually that something still has the mount open.
+DISMOUNT_ERROR=""
+
+try_dismount() {
+  local mountpoint="$1" out
+  DISMOUNT_ERROR=""
+  if out="$(veracrypt --text --dismount "$mountpoint" 2>&1 </dev/null)"; then
+    return 0
+  fi
+  DISMOUNT_ERROR="$(printf '%s' "$out" | grep -v '^$' | tail -n 1)"
+  [[ -n "$DISMOUNT_ERROR" ]] || DISMOUNT_ERROR="veracrypt could not unmount it"
+  return 1
+}
+
+# sudo without a terminal cannot ask for a password. That is the one failure
+# worth retrying somewhere else rather than reporting.
+needs_terminal() {
+  local text="${1-}"
+  [[ "$text" == *sudo* || "$text" == *tty* || "$text" == *askpass* \
+    || "$text" == *assword* ]]
+}
+
 # Re-run ourselves in a terminal, where VeraCrypt can ask for the passphrase
 # and sudo can ask for a password. Neither one passes through the plugin.
 relaunch_in_terminal() {
@@ -346,15 +370,20 @@ unmount_vault() {
     printf '{"ok":true,"message":"Already unmounted","name":"%s"}\n' "$(json_escape "$name")"
     return 0
   fi
-  # Dismounting needs root as well, so it takes the same route.
-  if ! has_gui && ! has_terminal; then
+  if try_dismount "$mountpoint"; then
+    printf '{"ok":true,"message":"Unmounted","name":"%s"}\n' "$(json_escape "$name")"
+    return 0
+  fi
+  # Only a missing password justifies a terminal. Anything else -- a mount
+  # something still has open, most often -- is a real answer, and the panel is
+  # where it should show up.
+  if ! has_terminal && needs_terminal "$DISMOUNT_ERROR"; then
     relaunch_in_terminal unmount "$name"
     printf '{"ok":true,"message":"Opened a terminal to unmount","name":"%s"}\n' \
       "$(json_escape "$name")"
     return 0
   fi
-  veracrypt --text --dismount "$mountpoint"
-  printf '{"ok":true,"message":"Unmounted","name":"%s"}\n' "$(json_escape "$name")"
+  die_json "$DISMOUNT_ERROR"
 }
 
 # Mount everything in the config that is not mounted yet. One terminal for the
@@ -415,23 +444,23 @@ unmount_all() {
   local count=${#names[@]}
   (( count > 0 )) || { printf '{"ok":true,"message":"Nothing mounted"}\n'; return 0; }
 
-  # One terminal for the lot, so sudo asks once rather than once per vault.
-  if ! has_gui && ! has_terminal; then
+  local failed=0 record last_error=""
+  for name in "${names[@]}"; do
+    record="$(vault_by_name "$name")" || { failed=$((failed + 1)); continue; }
+    IFS=$'\t' read -r name container mountpoint <<< "$record"
+    try_dismount "$mountpoint" || { failed=$((failed + 1)); last_error="$DISMOUNT_ERROR"; }
+  done
+
+  # One terminal for the lot, but only if a password is what stopped us.
+  if (( failed > 0 )) && ! has_terminal && needs_terminal "$last_error"; then
     relaunch_in_terminal unmount-all
     printf '{"ok":true,"message":"Opened a terminal to unmount %d %s"}\n' "$count" "$(plural "$count")"
     return 0
   fi
 
-  local failed=0 record
-  for name in "${names[@]}"; do
-    record="$(vault_by_name "$name")" || { failed=$((failed + 1)); continue; }
-    IFS=$'\t' read -r name container mountpoint <<< "$record"
-    veracrypt --text --dismount "$mountpoint" || failed=$((failed + 1))
-  done
-
   if (( failed > 0 )); then
-    printf '{"ok":false,"error":"Unmounted %d of %d %s"}\n' \
-      "$((count - failed))" "$count" "$(plural "$count")"
+    printf '{"ok":false,"error":"Unmounted %d of %d %s: %s"}\n' \
+      "$((count - failed))" "$count" "$(plural "$count")" "$(json_escape "$last_error")"
     return 1
   fi
   printf '{"ok":true,"message":"Unmounted %d %s"}\n' "$count" "$(plural "$count")"

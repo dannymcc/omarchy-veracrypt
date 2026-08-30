@@ -108,9 +108,19 @@ Panel {
     return false
   }
 
+  // Never gated on `busy`. Reading status is harmless, and gating it meant a
+  // single action whose exit went missing froze the panel on stale data for
+  // the rest of the session -- which is exactly how the panel ended up
+  // claiming a vault was mounted after it had been unmounted by hand.
   function refresh() {
-    if (!busy)
-      statusProcess.running = true
+    statusProcess.running = true
+  }
+
+  // An action that reports through a terminal finishes long after the process
+  // we spawned returns, so keep looking for a while afterwards.
+  function refreshSoon() {
+    followUp.count = 0
+    followUp.restart()
   }
 
   function runScript(args) {
@@ -316,12 +326,38 @@ Panel {
           root.vaults = data.vaults || []
           root.configured = data.configured === true
           root.configPath = data.configPath || ""
-          root.message = data.ok ? "" : (data.error || "Could not read vaults")
+          // A poll must not wipe what an action just said.
+          if (!data.ok) root.message = data.error || "Could not read vaults"
+          else if (!root.busy) root.message = ""
         } catch (e) {
           root.message = "Could not parse VeraCrypt status"
         }
       }
     }
+  }
+
+  // Catches the unmount that happens in a terminal a few seconds after the
+  // process we spawned has returned.
+  Timer {
+    id: followUp
+    property int count: 0
+    interval: 2500
+    repeat: true
+    running: false
+    onTriggered: {
+      root.refresh()
+      count++
+      if (count >= 6) stop()
+    }
+  }
+
+  // A lost exit signal used to strand `busy` forever, disabling every button
+  // in the panel. Time it out instead.
+  Timer {
+    id: busyWatchdog
+    interval: 30000
+    running: root.busy
+    onTriggered: root.busy = false
   }
 
   Process {
@@ -344,6 +380,7 @@ Panel {
       // Refresh through the widget so the bar's count follows the panel.
       if (root.hostWidget && typeof root.hostWidget.refresh === "function") root.hostWidget.refresh()
       else root.refresh()
+      root.refreshSoon()
     }
   }
 

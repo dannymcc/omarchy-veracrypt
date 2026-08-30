@@ -1,10 +1,8 @@
 # VeraCrypt Vaults for Omarchy
 
-Mount and unmount configured VeraCrypt containers from the Omarchy bar.
+Mount and unmount your VeraCrypt containers straight from the Omarchy bar, instead of opening the VeraCrypt GUI and clicking through it every time.
 
-This is an Omarchy Quattro shell plugin with a small CLI wrapper. The plugin does
-not store VeraCrypt passphrases. Mounting delegates to VeraCrypt itself, so the
-VeraCrypt GUI handles credential prompts.
+It's an Omarchy Quattro shell plugin with a small CLI wrapper. The plugin never stores or handles your passphrases. Mounting hands off to VeraCrypt itself, so VeraCrypt does the credential prompt.
 
 ## Install
 
@@ -21,42 +19,43 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.dannymcc.veracrypt-vaults
 ```
 
-## Configure Vaults
+## Configure your vaults
 
-Create `~/.config/omarchy/veracrypt-vaults.tsv`:
+Create `~/.config/omarchy/veracrypt-vaults.tsv`, one vault per line:
 
 ```text
 Personal	/home/danny/vaults/personal.hc	/home/danny/Vaults/Personal
 Archive	/home/danny/vaults/archive.tc	/home/danny/Vaults/Archive
 ```
 
-The file is tab-separated:
+The columns are tab-separated:
 
 ```text
 name<TAB>container_path<TAB>mount_directory
 ```
 
-Blank lines and lines beginning with `#` are ignored.
+Blank lines and lines starting with `#` are ignored. There's a `config.example.tsv` in the repo to copy from.
 
 ## Use
 
-Click the VeraCrypt bar widget to open the panel. Each configured vault shows:
+Click the VeraCrypt widget in the bar to open the panel. Each configured vault shows:
 
 - mount status
-- container path or mount path
+- container path, or mount path once mounted
 - `Mount` / `Unmount`
-- `Open` when mounted
+- `Open`, when mounted
 
-The wrapper can also be used directly:
+You can also drive the wrapper directly:
 
 ```bash
-scripts/veracrypt-vaults status
+scripts/veracrypt-vaults list              # list configured vaults
+scripts/veracrypt-vaults status            # mount status for all vaults
 scripts/veracrypt-vaults mount Personal
 scripts/veracrypt-vaults unmount Personal
 scripts/veracrypt-vaults open Personal
 ```
 
-For terminal-only passphrase prompting:
+To prompt for the passphrase in the terminal rather than the VeraCrypt GUI:
 
 ```bash
 VERACRYPT_VAULTS_TEXT=1 scripts/veracrypt-vaults mount Personal
@@ -69,24 +68,21 @@ VERACRYPT_VAULTS_TEXT=1 scripts/veracrypt-vaults mount Personal
 - `findmnt`
 - `xdg-open` for the `Open` action
 
-On Arch/Omarchy, VeraCrypt is commonly installed from the Arch repositories or
-AUR depending on your configured package sources.
+On Arch and Omarchy, VeraCrypt comes from the Arch repositories or the AUR, depending on how your package sources are set up.
 
-## Security Notes
+## Security notes
 
-Omarchy plugins run unsandboxed inside the long-lived Omarchy shell process.
-Review this plugin before enabling it.
+Omarchy plugins run unsandboxed inside the long-lived Omarchy shell process. Read this plugin before you enable it.
 
-This plugin deliberately avoids:
+By design, it does not:
 
-- storing VeraCrypt passwords
-- passing passphrases on the command line
-- adding systemd units
-- privilege elevation helpers
-- installing packages automatically
+- store VeraCrypt passwords
+- pass passphrases on the command line
+- add systemd units
+- ship privilege-elevation helpers
+- install packages for you
 
-Mounting still gives VeraCrypt access to the configured container and mount
-directory. A compromised user session can access anything the user can access.
+Mounting still gives VeraCrypt access to the configured container and mount directory, and a compromised user session can reach anything the user can reach. The plugin narrows the attack surface, it doesn't remove it.
 
 ## Validate
 
@@ -96,7 +92,7 @@ On an Omarchy machine:
 omarchy plugin validate .
 ```
 
-The CLI can be checked without Omarchy:
+The CLI works without Omarchy, so you can smoke-test it against the example config:
 
 ```bash
 VERACRYPT_VAULTS_CONFIG=./config.example.tsv scripts/veracrypt-vaults list
@@ -109,7 +105,7 @@ omarchy plugin disable io.github.dannymcc.veracrypt-vaults
 omarchy plugin remove io.github.dannymcc.veracrypt-vaults
 ```
 
-Remove the config file manually if you no longer want it:
+Delete the config yourself if you're done with it:
 
 ```bash
 rm ~/.config/omarchy/veracrypt-vaults.tsv

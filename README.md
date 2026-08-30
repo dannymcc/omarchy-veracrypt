@@ -127,9 +127,12 @@ VERACRYPT_VAULTS_TEXT=1 scripts/veracrypt-vaults mount Personal
 ## Dependencies
 
 - Omarchy 4 / Quattro shell
-- VeraCrypt CLI on `PATH`
+- VeraCrypt on `PATH`, either build
 - `findmnt`
 - `xdg-open` for the `Open` action
+- A terminal, only for the console build of VeraCrypt: the plugin uses
+  `omarchy-launch-floating-terminal-with-presentation`, falling back to
+  `xdg-terminal-exec`, so VeraCrypt has somewhere to ask for the passphrase
 
 On Arch and Omarchy, VeraCrypt comes from the Arch repositories or the AUR, depending on how your package sources are set up.
 

@@ -18,6 +18,13 @@ Panel {
   property string message: ""
   property bool busy: false
 
+  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  readonly property color dim: Qt.darker(foreground, 1.55)
+  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property color rowFill: Style.hoverFillFor(foreground, Color.accent)
+  readonly property color mountedFill: Style.selectedFillFor(foreground, Color.accent)
+
   function open() {
     root.controller.show()
     refresh()
@@ -131,107 +138,126 @@ Panel {
       Column {
         id: content
         width: parent.width
-        spacing: 12
+        spacing: Style.space(12)
 
-      Row {
-        width: parent.width
-        spacing: 8
+        Row {
+          width: parent.width
+          spacing: Style.space(8)
 
-        Text {
-          text: "VeraCrypt"
-          color: Color.foreground
-          font.pixelSize: 18
-          font.bold: true
-          verticalAlignment: Text.AlignVCenter
-          width: parent.width - refreshButton.width - 8
-          elide: Text.ElideRight
-        }
+          Text {
+            text: "VeraCrypt"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+            font.bold: true
+            verticalAlignment: Text.AlignVCenter
+            width: parent.width - refreshButton.width - Style.space(8)
+            elide: Text.ElideRight
+          }
 
-        Button {
-          id: refreshButton
-          text: "Refresh"
-          enabled: !root.busy
-          onClicked: root.refresh()
-        }
-      }
-
-      Text {
-        width: parent.width
-        text: root.message
-        color: Color.muted
-        font.pixelSize: 12
-        wrapMode: Text.Wrap
-        visible: root.message.length > 0
-      }
-
-      ListView {
-        id: vaultList
-        width: parent.width
-        height: Math.min(360, Math.max(72, count * 74))
-        clip: true
-        model: root.vaults
-        spacing: 8
-
-        delegate: Rectangle {
-          width: vaultList.width
-          height: 66
-          radius: 8
-          color: Color.surface
-          border.color: modelData.mounted ? Color.accent : Color.border
-
-          Row {
-            anchors.fill: parent
-            anchors.margins: 10
-            spacing: 10
-
-            Column {
-              width: parent.width - 172
-              spacing: 4
-              anchors.verticalCenter: parent.verticalCenter
-
-              Text {
-                text: modelData.name
-                color: Color.foreground
-                font.pixelSize: 14
-                font.bold: true
-                elide: Text.ElideRight
-                width: parent.width
-              }
-
-              Text {
-                text: modelData.mounted ? modelData.mountPoint : modelData.container
-                color: modelData.containerExists ? Color.muted : Color.urgent
-                font.pixelSize: 11
-                elide: Text.ElideMiddle
-                width: parent.width
-              }
-            }
-
-            Button {
-              width: 76
-              text: modelData.mounted ? "Unmount" : "Mount"
-              enabled: !root.busy && modelData.containerExists
-              onClicked: root.runAction(modelData.mounted ? "unmount" : "mount", modelData.name)
-            }
-
-            Button {
-              width: 66
-              text: "Open"
-              enabled: !root.busy && modelData.mounted
-              onClicked: root.runAction("open", modelData.name)
-            }
+          Button {
+            id: refreshButton
+            text: "Refresh"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            bordered: true
+            enabled: !root.busy
+            onClicked: root.refresh()
           }
         }
 
         Text {
-          anchors.centerIn: parent
+          width: parent.width
+          text: root.message
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
+          visible: root.message.length > 0
+        }
+
+        Text {
+          width: parent.width
           text: "No vaults configured"
-          color: Color.muted
-          font.pixelSize: 13
-          visible: vaultList.count === 0
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          horizontalAlignment: Text.AlignHCenter
+          visible: root.vaults.length === 0
+        }
+
+        ListView {
+          id: vaultList
+          width: parent.width
+          height: Math.min(Style.space(360), count * (Style.space(66) + Style.space(8)))
+          visible: count > 0
+          clip: true
+          model: root.vaults
+          spacing: Style.space(8)
+
+          delegate: Rectangle {
+            width: vaultList.width
+            height: Style.space(66)
+            radius: Style.cornerRadius
+            color: modelData.mounted ? root.mountedFill : root.rowFill
+            border.width: 1
+            border.color: modelData.mounted ? Color.accent : Util.alpha(root.foreground, 0.18)
+
+            Row {
+              anchors.fill: parent
+              anchors.margins: Style.space(10)
+              spacing: Style.space(10)
+
+              Column {
+                width: parent.width - mountButton.width - openButton.width - Style.space(20)
+                spacing: Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
+
+                Text {
+                  text: modelData.name
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title
+                  font.bold: true
+                  elide: Text.ElideRight
+                  width: parent.width
+                }
+
+                Text {
+                  text: modelData.mounted ? modelData.mountPoint : modelData.container
+                  color: modelData.containerExists ? root.dim : root.urgent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideMiddle
+                  width: parent.width
+                }
+              }
+
+              Button {
+                id: mountButton
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData.mounted ? "Unmount" : "Mount"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                enabled: !root.busy && (modelData.mounted || modelData.containerExists)
+                onClicked: root.runAction(modelData.mounted ? "unmount" : "mount", modelData.name)
+              }
+
+              Button {
+                id: openButton
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Open"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                enabled: !root.busy && modelData.mounted
+                onClicked: root.runAction("open", modelData.name)
+              }
+            }
+          }
         }
       }
     }
-  }
   }
 }

@@ -8,7 +8,13 @@ It's an Omarchy Quattro bar-widget plugin with a dropdown panel and a small CLI 
 
 ```bash
 omarchy plugin add https://github.com/dannymcc/omarchy-veracrypt.git --enable
+omarchy restart shell
 ```
+
+The shell hot-reloads plugin code on save, but a widget added while it is
+running can end up with a component load that never finishes, and the shell
+skips a widget whose load is still in flight. If the lock icon does not show
+up on the bar, `omarchy restart shell` clears it.
 
 For local development:
 
@@ -17,6 +23,7 @@ mkdir -p ~/.config/omarchy/plugins
 cp -r "$PWD" ~/.config/omarchy/plugins/io.github.dannymcc.veracrypt-vaults
 omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.dannymcc.veracrypt-vaults
+omarchy restart shell
 ```
 
 ## Configure your vaults
@@ -44,6 +51,15 @@ The plugin appears as a lock icon on the Omarchy bar. Click it to open the dropd
 - container path, or mount path once mounted
 - `Mount` / `Unmount`
 - `Open`, when mounted
+
+The dropdown also answers to IPC, so you can bind it to a key or drive it from
+a script:
+
+```bash
+omarchy-shell io.github.dannymcc.veracrypt-vaults toggle
+omarchy-shell io.github.dannymcc.veracrypt-vaults refresh
+omarchy-shell io.github.dannymcc.veracrypt-vaults status   # "2/3", or "Vaults"
+```
 
 You can also drive the wrapper directly:
 

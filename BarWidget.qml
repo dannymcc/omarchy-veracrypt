@@ -68,6 +68,21 @@ BarWidget {
 
   Component.onCompleted: refresh()
 
+  // Same open/close/toggle surface every first-party widget exposes, so the
+  // dropdown can be driven from a keybinding or a script:
+  //   omarchy-shell io.github.dannymcc.veracrypt-vaults toggle
+  IpcHandler {
+    target: "io.github.dannymcc.veracrypt-vaults"
+
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.toggle() }
+    function refresh(): string { root.broadcast("refresh"); return "ok" }
+    function status(): string { return root.statusText }
+  }
+
   Timer {
     interval: root.pollMs
     running: true

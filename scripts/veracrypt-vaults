@@ -46,7 +46,6 @@ ensure_veracrypt() {
 }
 
 read_vaults() {
-  ensure_config
   while IFS=$'\t' read -r name container mountpoint extra || [[ -n "${name:-}" ]]; do
     [[ -z "${name:-}" || "${name:0:1}" == "#" ]] && continue
     [[ -n "${container:-}" && -n "${mountpoint:-}" && -z "${extra:-}" ]] || continue
@@ -67,8 +66,9 @@ vault_by_name() {
 }
 
 is_mounted() {
-  local mountpoint="$1"
-  findmnt -T "$mountpoint" >/dev/null 2>&1
+  local mountpoint="${1-}"
+  [[ -n "$mountpoint" ]] || return 1
+  findmnt -M "$mountpoint" >/dev/null 2>&1
 }
 
 mounted_path_for() {
@@ -99,7 +99,7 @@ emit_status() {
   done < <(read_vaults)
 
   printf '{"ok":true,"mounted":%d,"total":%d,"vaults":[' "$mounted_count" "$total_count"
-  for row in "${rows[@]}"; do
+  for row in ${rows[@]+"${rows[@]}"}; do
     if [[ "$first" == true ]]; then
       first=false
     else
@@ -173,6 +173,10 @@ open_mountpoint() {
 
 main() {
   local command="${1:-}"
+  case "$command" in
+    list|status|mount|unmount|dismount|open) ensure_config ;;
+  esac
+
   case "$command" in
     list) emit_list ;;
     status) emit_status ;;

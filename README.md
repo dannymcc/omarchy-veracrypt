@@ -2,6 +2,8 @@
 
 Mount and unmount your VeraCrypt containers straight from the Omarchy bar, instead of opening the VeraCrypt GUI and clicking through it every time.
 
+![The VeraCrypt Vaults dropdown in the Omarchy bar](preview.png)
+
 It's an Omarchy Quattro bar-widget plugin with a dropdown panel and a small CLI wrapper. The plugin never stores or handles your passphrases. Mounting hands off to VeraCrypt itself, so VeraCrypt does the credential prompt.
 
 ## Install
@@ -26,31 +28,69 @@ omarchy plugin enable io.github.dannymcc.veracrypt-vaults
 omarchy restart shell
 ```
 
-## Configure your vaults
+## Add your vaults
 
-Create `~/.config/omarchy/veracrypt-vaults.tsv`, one vault per line:
+Open the dropdown and use **Add vault**. On a machine with nothing configured
+yet the form is already open, since it is the only useful thing the panel has
+to offer.
 
-```text
-Personal	/home/danny/vaults/personal.hc	/home/danny/Vaults/Personal
-Archive	/home/danny/vaults/archive.tc	/home/danny/Vaults/Archive
-```
+Each vault needs a name, a container file and a directory to mount it on. The
+two path fields have a built-in picker:
 
-The columns are tab-separated:
+- The file picker shows directories plus anything that looks like a container
+  (`.hc`, `.tc`, `.vc`, `.veracrypt`, `.truecrypt`), marked with a padlock.
+  Containers carry no magic bytes — the header is encrypted — so the extension
+  is the only hint there is. **Show all files** lifts the filter when your
+  container is named something else.
+- The directory picker can make the mount directory for you with **New folder
+  here**, because a mount point usually does not exist yet.
+
+The picker is built into the panel rather than being a GTK file dialog: the
+Omarchy panel dismisses on any click outside it, so an external chooser takes
+the panel down with it before it can hand a path back.
+
+Both fields stay editable, so you can paste a path instead. Pressing Enter on
+an empty path field opens its picker; arrow keys and Enter drive it.
+
+The `✕` on a row removes that vault from the config. It never touches the
+container itself, and it refuses while the vault is mounted.
+
+### Or edit the file
+
+The config is a tab-separated file at `~/.config/omarchy/veracrypt-vaults.tsv`:
 
 ```text
 name<TAB>container_path<TAB>mount_directory
 ```
 
-Blank lines and lines starting with `#` are ignored. There's a `config.example.tsv` in the repo to copy from.
+Blank lines and lines starting with `#` are ignored. There's a
+`config.example.tsv` in the repo to copy from.
 
 ## Use
 
-The plugin appears as a lock icon on the Omarchy bar. Click it to open the dropdown panel. Each configured vault shows:
+The plugin appears as a padlock on the Omarchy bar — closed while everything is
+locked, open once at least one vault is mounted. The tooltip carries the count.
+Click it to open the dropdown. Each configured vault shows:
 
 - mount status
 - container path, or mount path once mounted
 - `Mount` / `Unmount`
 - `Open`, when mounted
+- `✕` to drop it from the config
+
+**Unmount all** appears once more than one vault is mounted. It only closes the
+vaults in your config, never volumes mounted outside the plugin.
+
+### Passphrases
+
+Where the passphrase prompt appears depends on which VeraCrypt you have:
+
+- The GUI build asks in its own window.
+- `veracrypt-console-bin` has no GUI and asks on a terminal, so the plugin
+  opens a floating Omarchy terminal for the mount. sudo asks for its password
+  in the same window.
+
+Either way the passphrase goes straight to VeraCrypt. The plugin never sees it.
 
 The dropdown also answers to IPC, so you can bind it to a key or drive it from
 a script:
@@ -68,7 +108,11 @@ scripts/veracrypt-vaults list              # list configured vaults
 scripts/veracrypt-vaults status            # mount status for all vaults
 scripts/veracrypt-vaults mount Personal
 scripts/veracrypt-vaults unmount Personal
+scripts/veracrypt-vaults unmount-all
 scripts/veracrypt-vaults open Personal
+scripts/veracrypt-vaults add Personal ~/vaults/personal.hc ~/Vaults/Personal
+scripts/veracrypt-vaults remove Personal
+scripts/veracrypt-vaults config            # where the config file lives
 ```
 
 To prompt for the passphrase in the terminal rather than the VeraCrypt GUI:

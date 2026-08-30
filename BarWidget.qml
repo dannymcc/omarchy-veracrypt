@@ -20,7 +20,13 @@ BarWidget {
   property int totalCount: 0
   property string statusText: "Vaults"
   property bool busy: false
-  readonly property string vaultIcon: "󰌾"
+  // Closed padlock until something is mounted, open padlock once it is: the
+  // bar carries one glyph, so the glyph has to carry the state.
+  readonly property string vaultIcon: mountedCount > 0 ? "󰌿" : "󰌾"
+  // Resolved from this file's own location rather than a hardcoded $HOME
+  // path, so the plugin works wherever it is installed.
+  readonly property string scriptPath: Qt.resolvedUrl("scripts/veracrypt-vaults")
+    .toString().replace(/^file:\/\//, "")
 
   function injectPanel() {
     if (!panelLoader.item) return
@@ -92,7 +98,7 @@ BarWidget {
 
   Process {
     id: statusProcess
-    command: ["sh", "-c", "exec \"$HOME/.config/omarchy/plugins/io.github.dannymcc.veracrypt-vaults/scripts/veracrypt-vaults\" status"]
+    command: [root.scriptPath, "status"]
     running: false
 
     stdout: StdioCollector {
@@ -105,6 +111,8 @@ BarWidget {
             ? root.mountedCount + "/" + root.totalCount
             : "Vaults"
         } catch (e) {
+          root.mountedCount = 0
+          root.totalCount = 0
           root.statusText = "Vaults"
         }
       }
@@ -115,8 +123,10 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.vertical ? root.vaultIcon : root.vaultIcon + " " + root.statusText
-    tooltipText: "Open VeraCrypt vaults"
+    text: root.vaultIcon
+    tooltipText: root.totalCount === 0
+      ? "VeraCrypt vaults"
+      : root.mountedCount + " of " + root.totalCount + " vaults mounted"
     fixedWidth: root.vertical ? root.barSize : -1
     fixedHeight: root.barSize
     onPressed: function(buttonCode) {

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CONFIG_FILE="${VERACRYPT_VAULTS_CONFIG:-$HOME/.config/omarchy/veracrypt-vaults.tsv}"
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
 
 usage() {
   cat <<'EOF'
@@ -11,6 +12,12 @@ Usage:
   veracrypt-vaults mount <name>
   veracrypt-vaults unmount <name>
   veracrypt-vaults open <name>
+  veracrypt-vaults add <name> <container> <mount_directory>
+  veracrypt-vaults remove <name>
+  veracrypt-vaults unmount-all
+  veracrypt-vaults browse <directory> [files|dirs]
+  veracrypt-vaults mkdir <parent> <name>
+  veracrypt-vaults config
 
 Config:
   ~/.config/omarchy/veracrypt-vaults.tsv
@@ -37,12 +44,60 @@ have_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+expand_path() {
+  local path="${1-}"
+  case "$path" in
+    "~") path="$HOME" ;;
+    "~/"*) path="$HOME/${path#\~/}" ;;
+  esac
+  printf '%s' "$path"
+}
+
+# Fields are tab-separated, one vault per line, so a tab or newline in a value
+# would write a row that reads back as something else. A leading # would read
+# back as a comment.
+validate_field() {
+  local label="$1" value="$2"
+  [[ -n "$value" ]] || die_json "$label is required"
+  [[ "$value" != *$'\t'* && "$value" != *$'\n'* && "$value" != *$'\r'* ]] \
+    || die_json "$label cannot contain tabs or newlines"
+}
+
 ensure_config() {
   [[ -f "$CONFIG_FILE" ]] || die_json "Missing config: $CONFIG_FILE"
 }
 
 ensure_veracrypt() {
   have_cmd veracrypt || die_json "veracrypt is not installed or not on PATH"
+}
+
+# Arch ships both a GUI build and veracrypt-console-bin. The console build
+# asks for the passphrase on a terminal, and a click on the bar has nowhere to
+# type one, so the mount is handed to a terminal window instead.
+has_gui() {
+  [[ "${VERACRYPT_VAULTS_TEXT:-0}" == "1" ]] && return 1
+  local bin
+  bin="$(command -v veracrypt)" || return 1
+  ldd "$bin" 2>/dev/null | grep -qi "libwx_"
+}
+
+has_terminal() {
+  [[ -t 0 && -t 1 ]]
+}
+
+# Re-run ourselves in a terminal, where VeraCrypt can ask for the passphrase
+# and sudo can ask for a password. Neither one passes through the plugin.
+relaunch_in_terminal() {
+  local quoted
+  quoted="$(printf '%q ' "$SELF" "$@")"
+  if have_cmd omarchy-launch-floating-terminal-with-presentation; then
+    setsid omarchy-launch-floating-terminal-with-presentation "$quoted" >/dev/null 2>&1 &
+  elif have_cmd xdg-terminal-exec; then
+    setsid xdg-terminal-exec -- "$SELF" "$@" >/dev/null 2>&1 &
+  else
+    die_json "No terminal available to ask for the passphrase"
+  fi
+  disown 2>/dev/null || true
 }
 
 read_vaults() {
@@ -80,6 +135,8 @@ mounted_path_for() {
 
 emit_status() {
   ensure_veracrypt
+  local configured=false
+  [[ -f "$CONFIG_FILE" ]] && configured=true
   local first=true
   local mounted_count=0
   local total_count=0
@@ -96,9 +153,10 @@ emit_status() {
     exists=false
     [[ -e "$container" ]] && exists=true
     rows+=("{\"name\":\"$(json_escape "$name")\",\"container\":\"$(json_escape "$container")\",\"mountPoint\":\"$(json_escape "$mountpoint")\",\"mounted\":$mounted,\"containerExists\":$exists}")
-  done < <(read_vaults)
+  done < <([[ "$configured" == true ]] && read_vaults)
 
-  printf '{"ok":true,"mounted":%d,"total":%d,"vaults":[' "$mounted_count" "$total_count"
+  printf '{"ok":true,"configured":%s,"configPath":"%s","mounted":%d,"total":%d,"vaults":[' \
+    "$configured" "$(json_escape "$CONFIG_FILE")" "$mounted_count" "$total_count"
   for row in ${rows[@]+"${rows[@]}"}; do
     if [[ "$first" == true ]]; then
       first=false
@@ -126,6 +184,125 @@ emit_list() {
   printf ']}\n'
 }
 
+add_vault() {
+  local name container mountpoint
+  name="$1"
+  container="$(expand_path "$2")"
+  mountpoint="$(expand_path "$3")"
+
+  validate_field "Name" "$name"
+  validate_field "Container path" "$container"
+  validate_field "Mount directory" "$mountpoint"
+  [[ "${name:0:1}" != "#" ]] || die_json "Name cannot start with #"
+  [[ "${container:0:1}" == "/" ]] || die_json "Container path must be absolute"
+  [[ "${mountpoint:0:1}" == "/" ]] || die_json "Mount directory must be absolute"
+
+  if [[ -f "$CONFIG_FILE" ]] && vault_by_name "$name" >/dev/null 2>&1; then
+    die_json "A vault named $name already exists"
+  fi
+
+  mkdir -p "$(dirname -- "$CONFIG_FILE")"
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    {
+      printf '# VeraCrypt vaults for the Omarchy bar widget.\n'
+      printf '# One vault per line: name<TAB>container_path<TAB>mount_directory\n'
+    } > "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+  fi
+  # A config that lost its trailing newline would glue the new row onto the
+  # last one.
+  [[ -s "$CONFIG_FILE" && -n "$(tail -c 1 "$CONFIG_FILE")" ]] && printf '\n' >> "$CONFIG_FILE"
+  printf '%s\t%s\t%s\n' "$name" "$container" "$mountpoint" >> "$CONFIG_FILE"
+  printf '{"ok":true,"message":"Added %s","name":"%s"}\n' \
+    "$(json_escape "$name")" "$(json_escape "$name")"
+}
+
+remove_vault() {
+  local name="$1"
+  validate_field "Name" "$name"
+  vault_by_name "$name" >/dev/null 2>&1 || die_json "Unknown vault: $name"
+
+  local record container mountpoint discard
+  record="$(vault_by_name "$name")"
+  IFS=$'\t' read -r discard container mountpoint <<< "$record"
+  if is_mounted "$mountpoint" || mounted_path_for "$container"; then
+    die_json "Unmount $name before removing it"
+  fi
+
+  local tmp
+  tmp="$(mktemp "${CONFIG_FILE}.XXXXXX")"
+  # Keep comments and blank lines; drop only the row that owns this name.
+  awk -F'\t' -v target="$name" '$1 != target' "$CONFIG_FILE" > "$tmp"
+  chmod --reference="$CONFIG_FILE" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+  mv "$tmp" "$CONFIG_FILE"
+  printf '{"ok":true,"message":"Removed %s","name":"%s"}\n' \
+    "$(json_escape "$name")" "$(json_escape "$name")"
+}
+
+# Directory listing for the panel's built-in file picker. An external chooser
+# is no use: the panel dismisses on any click outside it, so a GTK dialog takes
+# the panel down with it before it can hand a path back.
+emit_browse() {
+  local dir mode
+  dir="$(expand_path "${1:-$HOME}")"
+  mode="${2:-files}"
+  [[ -d "$dir" ]] || dir="$HOME"
+  # Resolve, so ".." does not accumulate in the breadcrumb.
+  dir="$(cd -- "$dir" 2>/dev/null && pwd -P)" || die_json "Cannot read directory"
+
+  local parent
+  parent="$(dirname -- "$dir")"
+  [[ "$parent" == "$dir" ]] && parent=""
+
+  local rows=() entry base isdir likely ext
+  while IFS= read -r entry; do
+    base="${entry##*/}"
+    [[ "${base:0:1}" == "." ]] && continue
+    likely=false
+    if [[ -d "$entry" ]]; then
+      isdir=true
+    else
+      isdir=false
+      [[ "$mode" == "dirs" ]] && continue
+      # A container has no magic bytes by design -- the header is encrypted --
+      # so the extension is the only hint there is. These are the ones
+      # VeraCrypt and TrueCrypt hand out by default.
+      ext="${base##*.}"
+      [[ "$ext" != "$base" ]] && case "${ext,,}" in
+        hc|tc|vc|veracrypt|truecrypt) likely=true ;;
+      esac
+    fi
+    rows+=("{\"name\":\"$(json_escape "$base")\",\"path\":\"$(json_escape "$entry")\",\"dir\":$isdir,\"likely\":$likely}")
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 \( -type d -o -type f \) 2>/dev/null | sort -f)
+
+  local first=true
+  printf '{"ok":true,"path":"%s","parent":"%s","entries":[' \
+    "$(json_escape "$dir")" "$(json_escape "$parent")"
+  for row in ${rows[@]+"${rows[@]}"}; do
+    if [[ "$first" == true ]]; then first=false; else printf ','; fi
+    printf '%s' "$row"
+  done
+  printf ']}\n'
+}
+
+# Mount directories usually do not exist yet, so the picker can make one rather
+# than sending someone to a terminal for a mkdir.
+make_directory() {
+  local parent name target
+  parent="$(expand_path "$1")"
+  name="$2"
+  validate_field "Folder name" "$name"
+  [[ "$name" != */* ]] || die_json "Folder name cannot contain /"
+  [[ "$name" != "." && "$name" != ".." ]] || die_json "Invalid folder name"
+  [[ -d "$parent" ]] || die_json "No such directory: $parent"
+
+  target="$parent/$name"
+  [[ ! -e "$target" ]] || die_json "$name already exists"
+  mkdir -p -- "$target" || die_json "Could not create $target"
+  printf '{"ok":true,"message":"Created %s","path":"%s"}\n' \
+    "$(json_escape "$name")" "$(json_escape "$target")"
+}
+
 mount_vault() {
   ensure_veracrypt
   local record name container mountpoint
@@ -137,11 +314,21 @@ mount_vault() {
     printf '{"ok":true,"message":"Already mounted","name":"%s"}\n' "$(json_escape "$name")"
     return 0
   fi
-  if [[ "${VERACRYPT_VAULTS_TEXT:-0}" == "1" ]]; then
-    veracrypt --text --mount "$container" "$mountpoint" >/dev/null
-  else
-    veracrypt --mount "$container" "$mountpoint" >/dev/null
+  if has_gui; then
+    # The GUI build asks for the passphrase in its own window.
+    setsid veracrypt --mount "$container" "$mountpoint" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    printf '{"ok":true,"message":"VeraCrypt is asking for the passphrase","name":"%s"}\n' \
+      "$(json_escape "$name")"
+    return 0
   fi
+  if ! has_terminal; then
+    relaunch_in_terminal mount "$name"
+    printf '{"ok":true,"message":"Opened a terminal for the passphrase","name":"%s"}\n' \
+      "$(json_escape "$name")"
+    return 0
+  fi
+  veracrypt --text --mount "$container" "$mountpoint"
   printf '{"ok":true,"message":"Mounted","name":"%s"}\n' "$(json_escape "$name")"
 }
 
@@ -154,8 +341,51 @@ unmount_vault() {
     printf '{"ok":true,"message":"Already unmounted","name":"%s"}\n' "$(json_escape "$name")"
     return 0
   fi
-  veracrypt --text --dismount "$mountpoint" >/dev/null
+  # Dismounting needs root as well, so it takes the same route.
+  if ! has_gui && ! has_terminal; then
+    relaunch_in_terminal unmount "$name"
+    printf '{"ok":true,"message":"Opened a terminal to unmount","name":"%s"}\n' \
+      "$(json_escape "$name")"
+    return 0
+  fi
+  veracrypt --text --dismount "$mountpoint"
   printf '{"ok":true,"message":"Unmounted","name":"%s"}\n' "$(json_escape "$name")"
+}
+
+# Unmount everything this config knows to be mounted. Deliberately not
+# `veracrypt --dismount` with no argument: that would also take down volumes
+# mounted outside the plugin, which are none of its business.
+unmount_all() {
+  ensure_veracrypt
+  local names=() name container mountpoint
+  while IFS=$'\t' read -r name container mountpoint; do
+    if is_mounted "$mountpoint" || mounted_path_for "$container"; then
+      names+=("$name")
+    fi
+  done < <(read_vaults)
+
+  local count=${#names[@]}
+  (( count > 0 )) || { printf '{"ok":true,"message":"Nothing mounted"}\n'; return 0; }
+
+  # One terminal for the lot, so sudo asks once rather than once per vault.
+  if ! has_gui && ! has_terminal; then
+    relaunch_in_terminal unmount-all
+    printf '{"ok":true,"message":"Opened a terminal to unmount %d vaults"}\n' "$count"
+    return 0
+  fi
+
+  local failed=0 record
+  for name in "${names[@]}"; do
+    record="$(vault_by_name "$name")" || { failed=$((failed + 1)); continue; }
+    IFS=$'\t' read -r name container mountpoint <<< "$record"
+    veracrypt --text --dismount "$mountpoint" || failed=$((failed + 1))
+  done
+
+  if (( failed > 0 )); then
+    printf '{"ok":false,"error":"Unmounted %d of %d vaults"}\n' "$((count - failed))" "$count"
+    return 1
+  fi
+  printf '{"ok":true,"message":"Unmounted %d vaults"}\n' "$count"
 }
 
 open_mountpoint() {
@@ -173,17 +403,35 @@ open_mountpoint() {
 
 main() {
   local command="${1:-}"
+  # status answers without a config file so the panel can offer to make one;
+  # everything else needs one to mean anything.
   case "$command" in
-    list|status|mount|unmount|dismount|open) ensure_config ;;
+    list|mount|unmount|dismount|open|remove|unmount-all|dismount-all) ensure_config ;;
   esac
 
   case "$command" in
+    config) printf '{"ok":true,"configPath":"%s","exists":%s}\n' \
+      "$(json_escape "$CONFIG_FILE")" "$([[ -f "$CONFIG_FILE" ]] && echo true || echo false)" ;;
     list) emit_list ;;
     status) emit_status ;;
+    browse) emit_browse "${2:-}" "${3:-files}" ;;
+    mkdir)
+      [[ $# -eq 3 ]] || die_json "mkdir requires a parent directory and a name"
+      make_directory "$2" "$3"
+      ;;
+    add)
+      [[ $# -eq 4 ]] || die_json "add requires a name, container path and mount directory"
+      add_vault "$2" "$3" "$4"
+      ;;
+    remove|delete)
+      [[ $# -eq 2 ]] || die_json "remove requires a vault name"
+      remove_vault "$2"
+      ;;
     mount)
       [[ $# -eq 2 ]] || die_json "mount requires a vault name"
       mount_vault "$2"
       ;;
+    unmount-all|dismount-all) unmount_all ;;
     unmount|dismount)
       [[ $# -eq 2 ]] || die_json "unmount requires a vault name"
       unmount_vault "$2"

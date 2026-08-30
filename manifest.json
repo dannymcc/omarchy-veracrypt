@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.dannymcc.veracrypt-vaults",
+  "name": "VeraCrypt Vaults",
+  "version": "0.1.0",
+  "author": "dannymcc",
+  "license": "MIT",
+  "description": "Mount and unmount configured VeraCrypt vaults from the Omarchy bar.",
+  "kinds": ["bar-widget", "panel"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "VeraCrypt",
+    "description": "Mount and unmount configured VeraCrypt vaults.",
+    "category": "Security",
+    "aliases": ["veracrypt", "vaults", "encryption"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "pollSeconds": 8
+    },
+    "schema": [
+      {
+        "key": "pollSeconds",
+        "type": "integer",
+        "label": "Refresh interval",
+        "min": 3,
+        "max": 120,
+        "step": 1,
+        "defaultValue": 8,
+        "description": "Seconds between mounted-vault status checks."
+      }
+    ]
+  }
+}

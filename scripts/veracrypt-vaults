@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="${VERACRYPT_VAULTS_CONFIG:-$HOME/.config/omarchy/veracrypt-vaults.tsv}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  veracrypt-vaults list
+  veracrypt-vaults status
+  veracrypt-vaults mount <name>
+  veracrypt-vaults unmount <name>
+  veracrypt-vaults open <name>
+
+Config:
+  ~/.config/omarchy/veracrypt-vaults.tsv
+  name<TAB>container_path<TAB>mount_directory
+EOF
+}
+
+json_escape() {
+  local value="${1-}"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
+die_json() {
+  printf '{"ok":false,"error":"%s"}\n' "$(json_escape "$1")"
+  exit "${2:-1}"
+}
+
+have_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+ensure_config() {
+  [[ -f "$CONFIG_FILE" ]] || die_json "Missing config: $CONFIG_FILE"
+}
+
+ensure_veracrypt() {
+  have_cmd veracrypt || die_json "veracrypt is not installed or not on PATH"
+}
+
+read_vaults() {
+  ensure_config
+  while IFS=$'\t' read -r name container mountpoint extra || [[ -n "${name:-}" ]]; do
+    [[ -z "${name:-}" || "${name:0:1}" == "#" ]] && continue
+    [[ -n "${container:-}" && -n "${mountpoint:-}" && -z "${extra:-}" ]] || continue
+    printf '%s\t%s\t%s\n' "$name" "$container" "$mountpoint"
+  done < "$CONFIG_FILE"
+}
+
+vault_by_name() {
+  local wanted="$1"
+  local name container mountpoint
+  while IFS=$'\t' read -r name container mountpoint; do
+    if [[ "$name" == "$wanted" ]]; then
+      printf '%s\t%s\t%s\n' "$name" "$container" "$mountpoint"
+      return 0
+    fi
+  done < <(read_vaults)
+  return 1
+}
+
+is_mounted() {
+  local mountpoint="$1"
+  findmnt -T "$mountpoint" >/dev/null 2>&1
+}
+
+mounted_path_for() {
+  local container="$1"
+  local line
+  line="$(veracrypt --text --list 2>/dev/null | awk -v c="$container" 'index($0, c) { print; exit }' || true)"
+  [[ -n "$line" ]]
+}
+
+emit_status() {
+  ensure_veracrypt
+  local first=true
+  local mounted_count=0
+  local total_count=0
+  local rows=()
+  local name container mountpoint mounted exists
+
+  while IFS=$'\t' read -r name container mountpoint; do
+    total_count=$((total_count + 1))
+    mounted=false
+    if is_mounted "$mountpoint" || mounted_path_for "$container"; then
+      mounted=true
+      mounted_count=$((mounted_count + 1))
+    fi
+    exists=false
+    [[ -e "$container" ]] && exists=true
+    rows+=("{\"name\":\"$(json_escape "$name")\",\"container\":\"$(json_escape "$container")\",\"mountPoint\":\"$(json_escape "$mountpoint")\",\"mounted\":$mounted,\"containerExists\":$exists}")
+  done < <(read_vaults)
+
+  printf '{"ok":true,"mounted":%d,"total":%d,"vaults":[' "$mounted_count" "$total_count"
+  for row in "${rows[@]}"; do
+    if [[ "$first" == true ]]; then
+      first=false
+    else
+      printf ','
+    fi
+    printf '%s' "$row"
+  done
+  printf ']}\n'
+}
+
+emit_list() {
+  local first=true
+  printf '{"ok":true,"vaults":['
+  local name container mountpoint
+  while IFS=$'\t' read -r name container mountpoint; do
+    if [[ "$first" == true ]]; then
+      first=false
+    else
+      printf ','
+    fi
+    printf '{"name":"%s","container":"%s","mountPoint":"%s"}' \
+      "$(json_escape "$name")" "$(json_escape "$container")" "$(json_escape "$mountpoint")"
+  done < <(read_vaults)
+  printf ']}\n'
+}
+
+mount_vault() {
+  ensure_veracrypt
+  local record name container mountpoint
+  record="$(vault_by_name "$1")" || die_json "Unknown vault: $1"
+  IFS=$'\t' read -r name container mountpoint <<< "$record"
+  [[ -e "$container" ]] || die_json "Container does not exist: $container"
+  mkdir -p "$mountpoint"
+  if is_mounted "$mountpoint"; then
+    printf '{"ok":true,"message":"Already mounted","name":"%s"}\n' "$(json_escape "$name")"
+    return 0
+  fi
+  if [[ "${VERACRYPT_VAULTS_TEXT:-0}" == "1" ]]; then
+    veracrypt --text --mount "$container" "$mountpoint" >/dev/null
+  else
+    veracrypt --mount "$container" "$mountpoint" >/dev/null
+  fi
+  printf '{"ok":true,"message":"Mounted","name":"%s"}\n' "$(json_escape "$name")"
+}
+
+unmount_vault() {
+  ensure_veracrypt
+  local record name container mountpoint
+  record="$(vault_by_name "$1")" || die_json "Unknown vault: $1"
+  IFS=$'\t' read -r name container mountpoint <<< "$record"
+  if ! is_mounted "$mountpoint" && ! mounted_path_for "$container"; then
+    printf '{"ok":true,"message":"Already unmounted","name":"%s"}\n' "$(json_escape "$name")"
+    return 0
+  fi
+  veracrypt --text --dismount "$mountpoint" >/dev/null
+  printf '{"ok":true,"message":"Unmounted","name":"%s"}\n' "$(json_escape "$name")"
+}
+
+open_mountpoint() {
+  local record name container mountpoint
+  record="$(vault_by_name "$1")" || die_json "Unknown vault: $1"
+  IFS=$'\t' read -r name container mountpoint <<< "$record"
+  [[ -d "$mountpoint" ]] || die_json "Mount point does not exist: $mountpoint"
+  if have_cmd xdg-open; then
+    xdg-open "$mountpoint" >/dev/null 2>&1 &
+    printf '{"ok":true,"message":"Opened","name":"%s"}\n' "$(json_escape "$name")"
+  else
+    die_json "xdg-open is not installed"
+  fi
+}
+
+main() {
+  local command="${1:-}"
+  case "$command" in
+    list) emit_list ;;
+    status) emit_status ;;
+    mount)
+      [[ $# -eq 2 ]] || die_json "mount requires a vault name"
+      mount_vault "$2"
+      ;;
+    unmount|dismount)
+      [[ $# -eq 2 ]] || die_json "unmount requires a vault name"
+      unmount_vault "$2"
+      ;;
+    open)
+      [[ $# -eq 2 ]] || die_json "open requires a vault name"
+      open_mountpoint "$2"
+      ;;
+    -h|--help|help|"")
+      usage
+      ;;
+    *)
+      die_json "Unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

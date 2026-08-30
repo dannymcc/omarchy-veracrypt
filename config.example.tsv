@@ -1,0 +1,4 @@
+# One vault per line: name<TAB>container_path<TAB>mount_directory
+# Lines beginning with # are ignored.
+Personal	/home/danny/vaults/personal.hc	/home/danny/Vaults/Personal
+Archive	/home/danny/vaults/archive.tc	/home/danny/Vaults/Archive

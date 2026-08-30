@@ -60,6 +60,18 @@ Panel {
   readonly property string scriptPath: Qt.resolvedUrl("scripts/veracrypt-vaults")
     .toString().replace(/^file:\/\//, "")
 
+  // The subtitle earns its keep when there is something to report. When
+  // everything is shut, it may as well be good company.
+  property int phraseIndex: 0
+  readonly property var idlePhrases: [
+    "Guarding secrets",
+    "Counting padlocks",
+    "Minding the vault",
+    "Holding the keys",
+    "Nothing to see here"
+  ]
+  readonly property string idlePhrase: idlePhrases[phraseIndex % idlePhrases.length]
+
   readonly property int mountedCount: {
     var n = 0
     for (var i = 0; i < vaults.length; i++) if (vaults[i].mounted) n++
@@ -257,6 +269,7 @@ Panel {
       closeBrowser()
       return
     }
+    phraseIndex = (phraseIndex + 1) % idlePhrases.length
     // With nothing configured, the form is the only useful thing the panel
     // has to offer, so it opens on that.
     if (vaults.length === 0 && !addOpen) openAddForm()
@@ -267,6 +280,28 @@ Panel {
     running: root.opened
     repeat: true
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    interval: 25000
+    running: root.opened && root.mountedCount === 0 && root.vaults.length > 0
+    repeat: true
+    onTriggered: phraseSwap.restart()
+  }
+
+  SequentialAnimation {
+    id: phraseSwap
+    PropertyAnimation {
+      target: hero; property: "metaOpacity"
+      to: 0.0; duration: 180; easing.type: Easing.OutQuad
+    }
+    ScriptAction {
+      script: root.phraseIndex = (root.phraseIndex + 1) % root.idlePhrases.length
+    }
+    PropertyAnimation {
+      target: hero; property: "metaOpacity"
+      to: 1.0; duration: 260; easing.type: Easing.InQuad
+    }
   }
 
   Process {
@@ -404,7 +439,7 @@ Panel {
             meta: root.vaults.length === 0
               ? "No vaults yet"
               : (root.mountedCount === 0
-                ? "All locked"
+                ? root.idlePhrase
                 : root.mountedCount + " of " + root.vaults.length + " mounted")
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -419,16 +454,31 @@ Panel {
             }
           }
 
-          PanelActionButton {
+          Row {
             id: headerControls
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "󰑐"
-            tooltipText: "Refresh"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            enabled: !root.busy
-            onClicked: root.refresh()
+            spacing: Style.space(4)
+
+            PanelActionButton {
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰐕"
+              tooltipText: "Add a vault"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              enabled: !root.busy && !root.addOpen
+              onClicked: root.openAddForm()
+            }
+
+            PanelActionButton {
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰑐"
+              tooltipText: "Refresh"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              enabled: !root.busy
+              onClicked: root.refresh()
+            }
           }
         }
 
@@ -551,24 +601,13 @@ Panel {
 
         PanelSeparator {
           width: parent.width
-          visible: root.vaults.length > 0 && !root.addOpen && root.browseTarget === ""
+          visible: root.mountedCount > 1 && !root.addOpen && root.browseTarget === ""
         }
 
         Row {
           width: parent.width
           spacing: Style.space(6)
-          visible: !root.addOpen && root.browseTarget === ""
-
-          Button {
-            text: "Add vault"
-            iconText: "󰐕"
-            foreground: root.busy ? root.dim : root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.bodySmall
-            bordered: true
-            enabled: !root.busy
-            onClicked: root.openAddForm()
-          }
+          visible: !root.addOpen && root.browseTarget === "" && root.mountedCount > 1
 
           // Only worth its space once there is more than one thing to close.
           Button {

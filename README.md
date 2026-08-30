@@ -30,7 +30,7 @@ omarchy restart shell
 
 ## Add your vaults
 
-Open the dropdown and use **Add vault**. On a machine with nothing configured
+Open the dropdown and use the `+` in the header. On a machine with nothing configured
 yet the form is already open, since it is the only useful thing the panel has
 to offer.
 
@@ -70,7 +70,8 @@ Blank lines and lines starting with `#` are ignored. There's a
 
 The plugin appears as a padlock on the Omarchy bar — closed while everything is
 locked, open once at least one vault is mounted. The tooltip carries the count.
-Click it to open the dropdown. Each configured vault shows:
+Click it to open the dropdown, where `+` adds a vault and the arrow refreshes.
+Each configured vault shows:
 
 - mount status
 - container path, or mount path once mounted

@@ -6,6 +6,8 @@ Mount and unmount your VeraCrypt containers straight from the Omarchy bar, inste
 
 It's an Omarchy Quattro bar-widget plugin with a dropdown panel and a small CLI wrapper. The plugin never stores or handles your passphrases. Mounting hands off to VeraCrypt itself, so VeraCrypt does the credential prompt.
 
+Listed in the [Omarchy plugin directory](https://plugins.omarchy.org/plugin.html?id=io.github.dannymcc.veracrypt-vaults).
+
 ## Install
 
 ```bash
